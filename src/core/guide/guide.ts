@@ -159,7 +159,7 @@ export const GUIDES: Record<GuideKey, readonly GuideStep[]> = {
 
   LIUYAO_PLACE: [
     s('把你手里的东西，搁到顺手的地方。', { x: 195, y: 560 }),
-    s('窗边、桌上、香炉旁，哪儿都行。', { x: 195, y: 600 }, 'place-item', 8000),
+    s('窗边、桌上、毯边，哪儿都行。', { x: 195, y: 600 }, 'place-item', 8000),
   ],
 
   LIUYAO_TOSS: [

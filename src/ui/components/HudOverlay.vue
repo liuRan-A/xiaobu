@@ -6,7 +6,7 @@
  *
  *   ① 顶部栏     —— 真实时钟 + 引擎里最近的一条等待日子；头像连点 5 次 = 开发者模式触发区（保留）
  *   ② 悬浮提示卡 —— 点击唤起小卜对话（小卜化球 + 弹输入框）
- *   ③ 底部输入区 —— 造牌（→ 塔罗）/ 按住说话（视觉反馈占位）/ 唤醒小卜
+ *   ③ 底部输入区 —— 造牌（→ 塔罗）/ 按住说话（接讯飞听写，音频出端需独立同意）/ 唤醒小卜
  *   ④ 底部导航栏 —— 小屋 / 占卜 / 记忆
  *   ⑤ 占卜页     —— 六爻 / 塔罗两个入口；点击回小屋并进入对应流程
  *   ⑥ 记忆页     —— 屋里摆件的清单与低语（只读；回看低语仍要回屋点它）
@@ -15,20 +15,38 @@
  *
  * ★ pointer-events 策略：容器 none，可点的块 auto —— 空白区域穿透给 canvas 掷币。
  *
- * ★ 诚实原则：没有功能的按钮不假装有结果 ——「按住说话」只有按压反馈，
- *   不弹出假的"识别结果"；等 ASR 接入后这里才有语义。
+ * ★ 诚实原则：拿不到结果就如实说"没听清" ——「按住说话」不做假的识别结果。
+ *   录音要先经用户单独同意（音频出端独立通道），拿到识别文本后交给小卜对话。
  * ===========================================================================
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppFlowStore, type AppTab } from '@store/appFlow'
 import { ORB_MARGIN_PX, ORB_RADIUS_PX, useXiaobuFormStore } from '@store/xiaobuForm'
+import { useVoiceInputStore } from '@store/voiceInput'
+import { useWeatherStore } from '@store/weather'
+import { useAudioStore } from '@store/audio'
 import { getEngine } from '@store/engineHost'
 import { resetXiaobuPos, setXiaobuVisible } from '@scene/layers'
+import { currentConfig } from '@bootstrap/bootSequence'
 import { recallOf, type MemoryKind } from '@core/memory/memoryAnchor'
+import { sendEmpathy } from '@ui/empathyChat'
+import { startVoice, finishVoice, setVoiceConsent, resetVoiceInput } from '@ui/voiceInput'
 import { logger } from '@shared/logger'
 
 const flow = useAppFlowStore()
 const xiaobu = useXiaobuFormStore()
+const voice = useVoiceInputStore()
+const weather = useWeatherStore()
+const audio = useAudioStore()
+
+// ── 顶栏天气小签（只读投影；拿不到 / 过期时为空串，什么都不提）─────────────
+//   ★ 天气是"替用户看一眼窗外"，不给预报/行话；陈旧时尾随一个淡淡的记号。
+const weatherLine = computed(() => {
+  if (!weather.visible) return ''
+  const t = weather.tempText
+  const base = t ? `${weather.label} · ${t}` : weather.label
+  return weather.stale ? `${base} ·` : base
+})
 
 // ── ① 顶栏：真实时钟 + 等待的日子 ──────────────────────────────────────────
 
@@ -94,8 +112,13 @@ function xiaobuToRoom(): void {
 function switchTab(tab: AppTab): void {
   if (flow.activeTab === tab) return
   flow.switchTab(tab)
-  if (tab === 'home') xiaobuToRoom()
-  else xiaobuToOrb()
+  if (tab === 'home') {
+    xiaobuToRoom()
+  } else {
+    // 离开小屋：停掉可能还按着的录音编排，别让一次按住跨页挂在那
+    resetVoiceInput()
+    xiaobuToOrb()
+  }
 }
 
 // ── ⑤ 占卜页：回小屋 + 进对应流程 ──────────────────────────────────────────
@@ -164,25 +187,50 @@ function craftCard(): void {
   pickDivine('TAROT')
 }
 
-// ── ③ 按住说话：只有按压反馈，不假装有识别结果 ──────────────────────────────
+// ── ③ 按住说话：接讯飞听写（音频出端走独立同意通道）────────────────────────
+//   按住 → 录制；松手 → 听写；拿到那句 → 交给小卜对话。没同意时只显示同意行。
 
-const speakHeld = ref(false)
-let speakTimer: ReturnType<typeof setTimeout> | null = null
+/** 同意行：仅在语音开关开启 + 尚未同意 + 还没问过时出现 */
+const showVoiceConsent = computed(
+  () =>
+    currentConfig().features.voiceInput.enabled && voice.consent === 'off' && !voice.consentAsked,
+)
+
+/** 按钮文案：听写中 > 录制中 > 待机 */
+const speakLabel = computed(() => {
+  if (voice.busy) return '小卜在听…'
+  if (voice.held && voice.recording) return '听着呢…'
+  return '按住说话'
+})
 
 function speakDown(): void {
-  speakHeld.value = true
-  speakTimer = setTimeout(() => {
-    speakHeld.value = true // 按住超过 600ms：文案切换为"听着呢"（由 held 驱动）
-  }, 600)
+  startVoice()
 }
 
 function speakUp(): void {
-  speakHeld.value = false
-  if (speakTimer !== null) {
-    clearTimeout(speakTimer)
-    speakTimer = null
-  }
+  void finishVoice()
 }
+
+function onVoiceConsent(choice: 'off' | 'on'): void {
+  setVoiceConsent(choice)
+}
+
+/**
+ * 听到一句 ⇒ 端到用户面前：切球 + 开小卜对话 + 发送。
+ * ★ 先 `await nextTick()`：让 panel 打开引发的 `openEmpathy()` 先落地，
+ *   再发送 —— 否则 openEmpathy 会自增会话序号，把刚发出的那轮听写作废。
+ */
+watch(
+  () => voice.heard,
+  async (t) => {
+    if (!t) return
+    const said = t
+    voice.setHeard('')
+    wakeXiaobu()
+    await nextTick()
+    await sendEmpathy(said)
+  },
+)
 
 // ── ① 头像：隐藏开发者模式触发区（DevPanel 未接入前只留触发计数） ────────────
 
@@ -241,8 +289,16 @@ function onAvatarTap(): void {
       <div class="topbar__left">
         <span class="topbar__time">{{ clock }}</span>
         <span class="topbar__countdown">· {{ waitLine }}</span>
+        <span v-if="weatherLine" class="topbar__weather">· {{ weatherLine }}</span>
       </div>
       <div class="topbar__right">
+        <button
+          class="topbar__icon"
+          :aria-label="audio.muted ? '打开声音' : '静音'"
+          @click="audio.toggle()"
+        >
+          {{ audio.muted ? '🔇' : '🔊' }}
+        </button>
         <button class="topbar__icon" aria-label="设置">⚙</button>
         <button class="topbar__avatar" aria-label="用户头像" @click="onAvatarTap">🙂</button>
       </div>
@@ -254,20 +310,34 @@ function onAvatarTap(): void {
     </aside>
 
     <!-- ③ 底部输入区（小屋页才有） -->
-    <footer v-show="flow.activeTab === 'home'" class="hud__input">
-      <button class="input__action" aria-label="造牌" @click="craftCard">🂠</button>
-      <button
-        class="input__speak"
-        :class="{ 'input__speak--held': speakHeld }"
-        aria-label="按住说话"
-        @pointerdown.prevent="speakDown"
-        @pointerup="speakUp"
-        @pointercancel="speakUp"
-        @pointerleave="speakUp"
-      >
-        <span class="input__speak-dot" />{{ speakHeld ? '听着呢…' : '按住说话' }}
-      </button>
-      <button class="input__action" aria-label="唤醒小卜" @click="wakeXiaobu">🐱</button>
+    <footer v-show="flow.activeTab === 'home'" class="hud__input-wrap">
+      <!-- 语音同意行：仅在语音开启 + 未同意 + 没问过时出现（音频出端独立通道） -->
+      <div v-if="showVoiceConsent" class="voice-consent">
+        <span class="voice-consent__text">说话要先把声音发给小卜听写，愿意吗？</span>
+        <div class="voice-consent__acts">
+          <button class="voice-consent__btn" @click="onVoiceConsent('off')">先不用</button>
+          <button class="voice-consent__btn voice-consent__btn--on" @click="onVoiceConsent('on')">好</button>
+        </div>
+      </div>
+
+      <!-- 诚实提示：没听清 / 不支持 / 已送出（拿不到就如实说） -->
+      <p v-if="voice.hint" class="voice-hint">{{ voice.hint }}</p>
+
+      <div class="hud__input">
+        <button class="input__action" aria-label="造牌" @click="craftCard">🂠</button>
+        <button
+          class="input__speak"
+          :class="{ 'input__speak--held': voice.held, 'input__speak--rec': voice.recording }"
+          aria-label="按住说话"
+          @pointerdown.prevent="speakDown"
+          @pointerup="speakUp"
+          @pointercancel="speakUp"
+          @pointerleave="speakUp"
+        >
+          <span class="input__speak-dot" />{{ speakLabel }}
+        </button>
+        <button class="input__action" aria-label="唤醒小卜" @click="wakeXiaobu">🐱</button>
+      </div>
     </footer>
 
     <!-- ④ 底部导航栏 -->
@@ -304,7 +374,7 @@ function onAvatarTap(): void {
 /* 每个可交互块显式接管点击 */
 .hud__topbar,
 .hud__hintcard,
-.hud__input,
+.hud__input-wrap,
 .hud__tabbar {
   pointer-events: auto;
   position: relative;
@@ -464,6 +534,13 @@ function onAvatarTap(): void {
   color: var(--c-ink-2);
 }
 
+/* 天气小签：与倒计时同层同调，只多一个字号的轻重差别 */
+.topbar__weather {
+  font-size: 12px;
+  color: var(--c-ink-2);
+  opacity: 0.85;
+}
+
 .topbar__right {
   display: flex;
   align-items: center;
@@ -508,12 +585,65 @@ function onAvatarTap(): void {
 }
 
 /* ── ③ 底部输入区 ── */
+.hud__input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 12px;
+}
+
+/* 语音独立同意行：羊皮纸小卡，和输入条同一层视觉 */
+.voice-consent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: var(--r-bubble);
+  background: linear-gradient(135deg, var(--c-wood-tag), var(--c-cream-warm));
+  box-shadow: 0 2px 12px rgba(122, 92, 66, 0.14);
+}
+
+.voice-consent__text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--c-ink);
+}
+
+.voice-consent__acts {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.voice-consent__btn {
+  padding: 6px 16px;
+  border: 1px solid rgba(66, 60, 82, 0.12);
+  border-radius: 999px;
+  background: var(--c-cream);
+  color: var(--c-ink-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.voice-consent__btn--on {
+  background: var(--c-matcha);
+  color: var(--c-ink);
+  border-color: transparent;
+}
+
+/* 诚实提示：拿不到结果就说没听清，不编 */
+.voice-hint {
+  margin: 0;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--c-ink-2);
+}
+
 .hud__input {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 10px 16px;
-  margin: 0 12px;
   border-radius: 999px;
   background: var(--c-cream-warm);
   box-shadow: 0 2px 14px rgba(122, 92, 66, 0.16);
@@ -552,6 +682,17 @@ function onAvatarTap(): void {
 .input__speak--held {
   background: var(--c-matcha);
   color: var(--c-ink);
+}
+
+/* 真在录：点一下红，给"它在听"的实感（拿不到麦克风时不会到这态） */
+.input__speak--rec {
+  background: var(--c-matcha);
+  color: var(--c-ink);
+}
+
+.input__speak--rec .input__speak-dot {
+  background: #d9534f;
+  opacity: 1;
 }
 
 .input__speak-dot {

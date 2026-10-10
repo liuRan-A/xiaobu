@@ -8,13 +8,14 @@
   ② 牌阵结构：按 (structure, role) 还原牌位标签；没翻开的牌给兜底句
   ③ 隐私：请求模型里**根本没有**能装用户原话的字段
   ④ 语气：桩文案不命中客户端的禁词（命中会被客户端整份丢弃、回落本地模板）
-  ⑤ 二次闸 / 成本 / 适配层 / 对话契约 / 提示词：见文件后半段各节
+  ⑤ 二次闸 / 成本 / 适配层 / 对话契约 / 语音听写契约 / 提示词：见文件后半段各节
   ⑥ 真模型返回基线：冻结的真实返回样例（离线钉形状）+ 联网实测（默认跳过）
 ==========================================================================
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import pathlib
@@ -24,13 +25,17 @@ import sys
 # 允许 "python server/test_contract.py" 直接跑（此时 sys.path[0] 是 server/，import server.main 会失败）
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from server import cost, guard, llm, prompts  # noqa: E402
+from server import asr, cost, guard, llm, prompts, weather  # noqa: E402
 from server.main import (  # noqa: E402
     FALLBACK_CHAT_REPLY,
     NOT_DRAWN_BODY,
+    AsrRequest,
+    AsrResponse,
     ChatRequest,
     ChatResponse,
     ReadingRequest,
+    WeatherResponse,
+    _decode_audio,
     _reading_visible,
     _to_reading_response,
     generate_reading,
@@ -52,6 +57,24 @@ _LLM_KEYS = (
 )
 _SAVED_ENV = {k: os.environ.get(k) for k in _LLM_KEYS}
 for _k in _LLM_KEYS:
+    os.environ.pop(_k, None)
+
+# ★ 同理：把可能残留的讯飞 XIAOBU_IFLYTEK_* 也摘掉，否则 asr.is_configured() 会为真，
+#   下面"未配置 ⇒ 回落空文本"的断言就假红了。ASR 不跑联网实测（讯飞是 WebSocket）。
+_ASR_KEYS = ("XIAOBU_IFLYTEK_APPID", "XIAOBU_IFLYTEK_APIKEY", "XIAOBU_IFLYTEK_APISECRET")
+for _k in _ASR_KEYS:
+    os.environ.pop(_k, None)
+
+# ★ 同理：天气（和风）也要先摘干净，否则本机若配过 Key，下面"未配置 ⇒ unknown"的断言会假红。
+#   最外层还额外把"一键停用"也清掉，保证落到"未配置"这条确定路径。
+_WEATHER_KEYS = (
+    "XIAOBU_HEFENG_KEY",
+    "XIAOBU_HEFENG_LOCATION",
+    "XIAOBU_HEFENG_HOST",
+    "XIAOBU_HEFENG_TIMEOUT_MS",
+    "XIAOBU_WEATHER_DISABLED",
+)
+for _k in _WEATHER_KEYS:
     os.environ.pop(_k, None)
 
 # ★ 联网实测开关：默认关。设 XIAOBU_LIVE=1 且配好 XIAOBU_LLM_* 才跑真模型。
@@ -175,6 +198,52 @@ _chat_fields = getattr(ChatRequest, "model_fields", None) or ChatRequest.__field
 _resp_fields = getattr(ChatResponse, "model_fields", None) or ChatResponse.__fields__
 check("请求模型字段 = {text, mood, turns}", set(_chat_fields) == {"text", "mood", "turns"})
 check("响应模型字段 = {reply, cents}", set(_resp_fields) == {"reply", "cents"})
+
+print("[contract] /api/asr 契约形状（第三条独立通道）")
+_asr_req_fields = getattr(AsrRequest, "model_fields", None) or AsrRequest.__fields__
+_asr_resp_fields = getattr(AsrResponse, "model_fields", None) or AsrResponse.__fields__
+check("请求模型字段 = {audio, format, durationMs}", set(_asr_req_fields) == {"audio", "format", "durationMs"})
+check("响应模型字段 = {text, cents}", set(_asr_resp_fields) == {"text", "cents"})
+check("未配 XIAOBU_IFLYTEK_* ⇒ is_configured() 为假（走回落）", asr.is_configured() is False)
+check("未配置 ⇒ transcribe 返回 None（永不抛）", asr.transcribe(b"\x00" * 128, "audio/L16;rate=16000", 100) is None)
+check("_is_raw_pcm 认 PCM/L16/raw", asr._is_raw_pcm("audio/L16;rate=16000") and asr._is_raw_pcm("raw"))
+check("_is_raw_pcm 不认 webm/opus（不硬塞给 iat）", not asr._is_raw_pcm("audio/webm;codecs=opus"))
+check("_frames 按 1280B 切帧", len(asr._frames(b"\x00" * 3000)) == 3)
+check("_decode_audio 空串 ⇒ b''", _decode_audio("") == b"")
+check("_decode_audio 脏 padding ⇒ b''（永不抛）", _decode_audio("abc") == b"")
+check("_decode_audio 超长 ⇒ b''（防误传大文件）", _decode_audio("A" * 4_000_001) == b"")
+check(
+    "_decode_audio 合法 base64 还原字节",
+    _decode_audio(base64.b64encode(b"\x01\x02\x03").decode("ascii")) == b"\x01\x02\x03",
+)
+
+print("[contract] /api/weather 契约形状（第四条链路 · 只读氛围）")
+_w_resp_fields = getattr(WeatherResponse, "model_fields", None) or WeatherResponse.__fields__
+check(
+    "响应模型字段 = {kind, tempC, degraded, brightness, updatedAt}",
+    set(_w_resp_fields) == {"kind", "tempC", "degraded", "brightness", "updatedAt"},
+)
+# ★ 隐私红线：天气请求**不接收任何用户字段**（它是一个无 body 的 GET）
+check("未配 XIAOBU_HEFENG_* ⇒ is_configured() 为假（走 unknown）", weather.is_configured() is False)
+check("kind_of_icon 100 晴 ⇒ clear", weather.kind_of_icon("100") == "clear")
+check("kind_of_icon 104 阴 ⇒ cloudy", weather.kind_of_icon("104") == "cloudy")
+check("kind_of_icon 305 小雨 ⇒ rain", weather.kind_of_icon("305") == "rain")
+check("kind_of_icon 400 小雪 ⇒ snow", weather.kind_of_icon("400") == "snow")
+check("kind_of_icon 脏值 ⇒ unknown", weather.kind_of_icon("abc") == "unknown")
+check("kind_of_icon 非雨雪编码 ⇒ unknown", weather.kind_of_icon("4999") == "unknown")
+
+_w_snap = weather.fetch_snapshot(now_ms=1_700_000_000_000)
+check("未配置 ⇒ kind='unknown'", _w_snap["kind"] == "unknown")
+check("未配置 ⇒ 降级码 2（拿不到）", _w_snap["degraded"] == 2)
+check("未配置 ⇒ tempC 为 None", _w_snap["tempC"] is None)
+check("快照恒含 updatedAt（注入值原样带出）", _w_snap["updatedAt"] == 1_700_000_000_000)
+# ★ 一键停用优先于"未配置"：置位后降级码应为 3，且仍然只吐 unknown
+os.environ["XIAOBU_WEATHER_DISABLED"] = "1"
+_w_off = weather.fetch_snapshot(now_ms=1)
+check("一键停用 ⇒ 降级码 3", _w_off["degraded"] == 3 and _w_off["kind"] == "unknown")
+os.environ.pop("XIAOBU_WEATHER_DISABLED", None)
+# ★ 契约自洽：fetch_snapshot 的输出必须能被 WeatherResponse 原样吸收（Pydantic 不报错）
+check("快照能被 WeatherResponse 吸收", isinstance(WeatherResponse(**_w_snap), WeatherResponse))
 
 print("[contract] 提示词（prompts.py）")
 _msgs = prompts.build_chat_messages("我今天很累", "TIRED", 1)

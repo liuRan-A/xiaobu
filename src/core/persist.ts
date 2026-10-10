@@ -78,6 +78,10 @@ export const PERSIST_KEYS = {
   affinity: 'xiaobu.affinity.v1',
   /** 共情对话：云端通道的用户同意（仅在 'on' 时原话才走独立的 /api/chat 出端；默认 'off'） */
   empathyConsent: 'xiaobu.empathy.consent.v1',
+  /** 语音输入：音频出端的用户同意（仅在 'on' 时录音才走独立的 /api/asr 出端；默认 'off'） */
+  voiceConsent: 'xiaobu.voice.consent.v1',
+  /** 背景音：静音偏好（true = 用户关掉了环境音；默认 false） */
+  audioMuted: 'xiaobu.audio.muted.v1',
 } as const
 
 export type PersistKey = (typeof PERSIST_KEYS)[keyof typeof PERSIST_KEYS]

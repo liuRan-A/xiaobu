@@ -2,3 +2,8 @@
 # 只针对本服务；客户端的依赖在仓库根的 package.json 里，两边互不影响。
 fastapi>=0.110,<1.0
 uvicorn>=0.29,<1.0
+
+# 语音听写（server/asr.py，科大讯飞 iat WebSocket）。
+# ★ 可选：不装也不影响解读 / 共情 —— asr.transcribe() 会直接返回 None，
+#   /api/asr 回落空文本（与未配置讯飞同一条降级路径）。
+# websockets>=12,<14

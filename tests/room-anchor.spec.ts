@@ -158,7 +158,9 @@ describe('分区 · zoneAt', () => {
     const tarot = getZone('TAROT')!
 
     // 先证明这一段**确实重叠**（否则下面那条断言是空的）
-    const probe: Pt = { x: 195, y: 700 }
+    // ★ 2026-10-10 重排：塔罗圆心从底部正中 (195,745) 移到右前角 (300,636)，
+    //   重叠探针随之取新圆心 —— 它同时落在两个圆内。
+    const probe: Pt = { x: 300, y: 636 }
     expect(dist(probe, liuyao.focus)).toBeLessThanOrEqual(liuyao.radius)
     expect(dist(probe, tarot.focus)).toBeLessThanOrEqual(tarot.radius)
 
@@ -166,13 +168,13 @@ describe('分区 · zoneAt', () => {
     expect(tarot.radius).toBeLessThan(liuyao.radius)
     expect(zoneAt(probe)).toBe('TAROT')
 
-    // 再取重叠段的两端各一个点，规律一致
-    expect(zoneAt({ x: 195, y: 620 })).toBe('TAROT')
-    expect(zoneAt({ x: 195, y: 765 })).toBe('TAROT')
+    // 再取重叠段里另两个点，规律一致（都在塔罗圆内、也都在六爻圆内）
+    expect(zoneAt({ x: 300, y: 600 })).toBe('TAROT')
+    expect(zoneAt({ x: 270, y: 660 })).toBe('TAROT')
   })
 
   it('只落在六爻域内、不在塔罗域内的点 → LIUYAO', () => {
-    // 桌面中心附近：距桌心很近，但离地毯圆心 265pt（> 130）→ 只有 LIUYAO 认领
+    // 桌面中心附近：距桌心很近，但离塔罗圆新圆心 (300,636) 107.7pt（> 100）→ 只有 LIUYAO 认领
     const p = anchorAt('TABLE_TOP')
     expect(zoneAt(p)).toBe('LIUYAO')
     expect(zoneAt({ x: 195, y: 470 })).toBe('LIUYAO')
@@ -192,7 +194,8 @@ describe('锚点几何 · 与 worldLayout 交叉校验', () => {
   it('M2 要求的四个锚点齐全，id 与顺序稳定', () => {
     expect(ANCHOR_IDS).toEqual(['WINDOW_SILL', 'TABLE_TOP', 'CENSER_SIDE', 'TEA_TABLE'])
     expect(ANCHORS.map((a) => a.id)).toEqual([...ANCHOR_IDS])
-    expect(ANCHORS.map((a) => a.label)).toEqual(['窗边', '木桌', '香炉旁', '茶几'])
+    // ★ 2026-10-10 重排：CENSER_SIDE 从画面外挪到地毯上，展示名随之改为「毯边」
+    expect(ANCHORS.map((a) => a.label)).toEqual(['窗边', '木桌', '毯边', '茶几'])
   })
 
   it('每个锚点都有归属分区、正半径、容量 1、以及被放下时小卜的一句话', () => {
@@ -220,17 +223,19 @@ describe('锚点几何 · 与 worldLayout 交叉校验', () => {
     }
   })
 
-  it('六爻的两个锚点（木桌、香炉旁）必须落在**桌面四边形**内', () => {
+  it('木桌锚点必须落在**桌面四边形**内', () => {
     // 用 scene 的真实 TABLE_QUAD 判定，不是另抄一组顶点。
     // 曾经桌面四顶点被量错（左右量到了画布边缘），后果是"摆件落在桌子外面"
     // 而没有任何断言在问这件事 —— 这条就是那条缺失的断言。
-    for (const id of ['TABLE_TOP', 'CENSER_SIDE'] as const) {
-      expect(inQuad(anchorAt(id), TABLE_QUAD), `${id} 不在桌面内`).toBe(true)
-    }
+    // ★ 2026-10-10 重排：CENSER_SIDE 已从桌面挪到地毯（展示名「毯边」），
+    //   桌面上只剩 TABLE_TOP 一个锚点。
+    expect(inQuad(anchorAt('TABLE_TOP'), TABLE_QUAD), 'TABLE_TOP 不在桌面内').toBe(true)
   })
 
-  it('茶几锚点必须落在**地毯椭圆**内 —— 牌是铺在毯上的', () => {
-    expect(inEllipse(anchorAt('TEA_TABLE'), FELT)).toBe(true)
+  it('地毯上的两个锚点（毯边、茶几）必须落在**地毯椭圆**内 —— 牌是铺在毯上的', () => {
+    for (const id of ['CENSER_SIDE', 'TEA_TABLE'] as const) {
+      expect(inEllipse(anchorAt(id), FELT), `${id} 不在地毯上`).toBe(true)
+    }
   })
 
   it('窗边锚点紧贴窗户下沿（在窗里就挡住光了，离太远又不叫"窗边"）', () => {
@@ -386,11 +391,12 @@ describe('resolveAnchor · 命中', () => {
   })
 
   it('两锚点域内的点吸到更近的那个（半径先筛、再比最近）', () => {
-    // TABLE_TOP(195,612) 与 TEA_TABLE(195,738) 相距 126 —— 两域不相交，
-    // 所以取中间点 (195, 700)：距 TEA_TABLE 38（域内 52），距 TABLE_TOP 88（域外 44）→ TEA_TABLE
-    const probe = resolveAnchor({ x: 195, y: 700 }, { full: fullNone() })
+    // ★ 2026-10-10 重排：TEA_TABLE 移到右前角 (300,636)，与 TABLE_TOP(195,612)
+    //   相距 107.7 —— 取毯上偏茶几的一点 (270,628)：
+    //   距 TEA_TABLE 31.05（域内 52），距 TABLE_TOP 76.7（域外 44）→ TEA_TABLE
+    const probe = resolveAnchor({ x: 270, y: 628 }, { full: fullNone() })
     expect(probe.id).toBe('TEA_TABLE')
-    expect(probe.distance).toBeCloseTo(38, 6)
+    expect(probe.distance).toBeCloseTo(31.05, 2)
   })
 })
 

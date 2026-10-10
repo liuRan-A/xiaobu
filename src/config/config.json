@@ -9,7 +9,8 @@
     "voiceInput": { "enabled": true },
     "haptics": { "enabled": true },
     "ledger": { "cnzz": false, "abtest": false },
-    "empathyCloud": { "enabled": false }
+    "empathyCloud": { "enabled": false },
+    "ambientAudio": { "enabled": true }
   },
 
   "quota": {

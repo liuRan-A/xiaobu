@@ -53,6 +53,11 @@ export type FunnelName =
   | 'EMPATHY_REPLY_LOCAL'
   | 'EMPATHY_REPLY_CLOUD'
   | 'EMPATHY_CONSENT_ON'
+  // 语音输入（音频出端走独立同意通道）。★ 只记"走到了哪一步"，永不记音频或识别文本
+  | 'VOICE_HOLD'
+  | 'VOICE_SENT'
+  | 'VOICE_FAILED'
+  | 'VOICE_CONSENT_ON'
 
 /**
  * ★ 载荷形状即隐私边界：只有枚举与数值。

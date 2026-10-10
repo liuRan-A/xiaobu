@@ -11,3 +11,11 @@ export {
   type TexStatus,
   type TexLoaderOptions,
 } from './loader'
+export {
+  resolveCardFaceUrl,
+  loadCardFace,
+  isCardFaceLoaded,
+  __test_resetCardFaces,
+  __test_cardFaceCacheSize,
+  __test_cardFaceDecodes,
+} from './cardFaces'

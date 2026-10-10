@@ -7,7 +7,8 @@
  *   ③ payload.ts  —— 逐字段出端、截断、白名单序列化
  * ===========================================================================
  */
-import { describe, expect, it, afterEach } from 'vitest'
+import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
 import {
   EMPATHY_ALL_LINES,
   EMPATHY_BANNED,
@@ -35,6 +36,14 @@ import {
 } from '@services/empathyCloud'
 import { applyConfig } from '@bootstrap/bootSequence'
 import { BUILT_IN_CONFIG, type XiaobuConfig } from '@bootstrap/builtinConfig'
+import {
+  openEmpathy,
+  closeEmpathy,
+  sendEmpathy,
+  __test_resetEmpathyChat,
+} from '@ui/empathyChat'
+import { useXiaobuFormStore } from '@store/xiaobuForm'
+import { resetEngineHost } from '@store/engineHost'
 
 // ───────────────────────────────────────────────────────────────────────────
 // ① empathy.ts
@@ -332,5 +341,138 @@ describe('④ parseCloudEmpathy · 结构校验', () => {
     expect(parseCloudEmpathy({ reply: '' })).toBeNull()
     expect(parseCloudEmpathy({ reply: '好'.repeat(EMPATHY_MAX_CHARS + 1) })).toBeNull()
     expect(parseCloudEmpathy({ reply: '抱歉，建议你休息' })).toBeNull()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// ⑤ ui/empathyChat.ts（编排与容错 · 柔和降级）
+// ───────────────────────────────────────────────────────────────────────────
+
+/** 只压日额度的配置（默认 20 太高，额度用例要压到 1） */
+function withQuota(on: boolean, quota: number): XiaobuConfig {
+  return {
+    ...BUILT_IN_CONFIG,
+    features: { ...BUILT_IN_CONFIG.features, empathyCloud: { enabled: on } },
+    quota: { ...BUILT_IN_CONFIG.quota, llmDailyFreePerUser: quota },
+  } as XiaobuConfig
+}
+
+/** 手动放行的 fetch：先挂起，测试里再 `done()` 让它回来 —— 用于"请求在途时关面板" */
+function deferredFetch(body: unknown): { fetchImpl: typeof fetch; done: () => void } {
+  let resolve!: (r: unknown) => void
+  const gate = new Promise<unknown>((r) => {
+    resolve = r
+  })
+  const fetchImpl = (async () => await gate) as unknown as typeof fetch
+  return { fetchImpl, done: () => resolve({ ok: true, status: 200, json: async () => body }) }
+}
+
+describe('⑤ empathyChat · 编排与容错（柔和降级）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    __test_resetEmpathyChat()
+    __test_resetEmpathyCloud()
+    resetEngineHost()
+    applyConfig(BUILT_IN_CONFIG as unknown as XiaobuConfig)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('云端开关关闭（默认）⇒ 零请求、不显示 typing、本地回应照常', async () => {
+    const f = capturingFetch({ reply: '云端回应不该出现' })
+    vi.stubGlobal('fetch', f.fetchImpl)
+    const s = useXiaobuFormStore()
+    openEmpathy()
+    s.setConsent('on') // 已同意，但开关关闭 → 闸门仍不过
+    await sendEmpathy('今天好累')
+    expect(f.calls()).toBe(0)
+    expect(s.typing).toBe(false)
+    expect(isEmpathySafe(s.latest.reply)).toBe(true)
+    expect(s.latest.reply).not.toBe('云端回应不该出现')
+  })
+
+  it('云端可用 + 云端成功 ⇒ 静默替换为云端回应', async () => {
+    applyConfig(withCloud(true))
+    const reply = '嗯，我在听。你慢慢说。'
+    const f = capturingFetch({ reply, cents: 1 })
+    vi.stubGlobal('fetch', f.fetchImpl)
+    const s = useXiaobuFormStore()
+    openEmpathy()
+    s.setConsent('on')
+    await sendEmpathy('今天好累')
+    expect(s.latest.mine).toBe('今天好累')
+    expect(s.latest.reply).toBe(reply)
+    expect(s.typing).toBe(false)
+  })
+
+  it('云端抛错 ⇒ 保留本地回应、不抛、typing 复位', async () => {
+    applyConfig(withCloud(true))
+    const boom = (async () => {
+      throw new Error('network down')
+    }) as unknown as typeof fetch
+    vi.stubGlobal('fetch', boom)
+    const s = useXiaobuFormStore()
+    openEmpathy()
+    s.setConsent('on')
+    const p = sendEmpathy('今天好累')
+    const local = s.latest.reply // 同帧就该有本地回应
+    expect(isEmpathySafe(local)).toBe(true)
+    await expect(p).resolves.toBeUndefined()
+    expect(s.latest.reply).toBe(local) // 未被替换
+    expect(s.typing).toBe(false)
+  })
+
+  it('云端回应命中禁词 ⇒ 保留本地（客户端再守一道）', async () => {
+    applyConfig(withCloud(true))
+    const f = capturingFetch({ reply: '这卦吉' }) // FORBIDDEN_COPY
+    vi.stubGlobal('fetch', f.fetchImpl)
+    const s = useXiaobuFormStore()
+    openEmpathy()
+    s.setConsent('on')
+    const p = sendEmpathy('今天好累')
+    const local = s.latest.reply
+    await p
+    expect(s.latest.reply).toBe(local)
+  })
+
+  it('额度用尽 ⇒ 第二次发送零请求、不显示 typing，仍有本地回应', async () => {
+    applyConfig(withQuota(true, 1))
+    const f = capturingFetch({ reply: '嗯，我在。', cents: 1 })
+    vi.stubGlobal('fetch', f.fetchImpl)
+    const s = useXiaobuFormStore()
+    openEmpathy()
+    s.setConsent('on')
+
+    await sendEmpathy('第一句')
+    expect(f.calls()).toBe(1) // 额度内：出端一次
+
+    await sendEmpathy('第二句')
+    expect(f.calls()).toBe(1) // 额度用尽：不再出端
+    expect(s.typing).toBe(false)
+    expect(isEmpathySafe(s.latest.reply)).toBe(true)
+  })
+
+  it('关闭面板后，迟到的云端回应不写回（防跨会话串话）', async () => {
+    applyConfig(withCloud(true))
+    const d = deferredFetch({ reply: '这是上一会话的迟到回应' })
+    vi.stubGlobal('fetch', d.fetchImpl)
+    const s = useXiaobuFormStore()
+    openEmpathy()
+    s.setConsent('on')
+
+    const p = sendEmpathy('今天好累')
+    expect(s.typing).toBe(true) // 请求在途
+
+    // 用户关掉面板（UI 的 watch 会 closeEmpathy + clearTurn）
+    closeEmpathy()
+    s.clearTurn()
+
+    d.done() // 云端这才回来
+    await p
+
+    expect(s.latest.reply).toBe('') // 迟到回应被会话守卫丢弃
+    expect(s.typing).toBe(false)
   })
 })

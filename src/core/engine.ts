@@ -108,6 +108,8 @@ import {
   type GuideWaitFor,
 } from '@core/guide/guide'
 import { loadConsent, saveConsent, type CloudConsent } from '@core/empathy/consent'
+import { loadVoiceConsent, saveVoiceConsent, type VoiceConsent } from '@core/voice/consent'
+import { loadAudioMuted, saveAudioMuted } from '@core/audio/prefs'
 
 // ───────────────────────────────────────────────────────────────────────────
 // 记忆浮现卡 · 呈现相位与降帧
@@ -1101,6 +1103,28 @@ export class Engine {
   /** 写云端同意。★ 由用户在低语卡里显式点选，下一次 flush 落盘；绝不在此处替用户做主 */
   setEmpathyConsent(c: CloudConsent): void {
     saveConsent(this.store, c)
+  }
+
+  // ── 语音输入 · 音频出端同意（与共情同意各管各的，见 core/voice/consent.ts）──
+  /** 读语音同意。★ 默认 'off'；UI 首次按住说话时同步一次，用于决定是否显示同意行 */
+  getVoiceConsent(): VoiceConsent {
+    return loadVoiceConsent(this.store)
+  }
+
+  /** 写语音同意。★ 由用户在同意行里显式点选，下一次 flush 落盘；绝不在此处替用户做主 */
+  setVoiceConsent(c: VoiceConsent): void {
+    saveVoiceConsent(this.store, c)
+  }
+
+  // ── 背景音 · 静音偏好（与语音/共情同意同路：经引擎持有的 PersistedStore）──
+  /** 读静音偏好。★ 默认 false（声音开着）；冷启动时装配层同步一次 */
+  getAudioMuted(): boolean {
+    return loadAudioMuted(this.store)
+  }
+
+  /** 写静音偏好。★ 由用户在 HUD 上显式点选，下一次 flush 落盘 */
+  setAudioMuted(muted: boolean): void {
+    saveAudioMuted(this.store, muted)
   }
 
   /** 抽牌：把"牌库里第几张"交给外部（洗牌逻辑在别处），这里只管顺序 */

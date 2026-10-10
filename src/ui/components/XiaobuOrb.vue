@@ -24,7 +24,7 @@ import { useAppFlowStore } from '@store/appFlow'
 import { designToScreen, computeFit } from '@scene/renderer'
 import { resetXiaobuPos, setXiaobuVisible, xiaobuAt } from '@scene/layers'
 import { currentConfig } from '@bootstrap/bootSequence'
-import { openEmpathy, sendEmpathy, setConsent } from '@ui/empathyChat'
+import { openEmpathy, closeEmpathy, sendEmpathy, setConsent } from '@ui/empathyChat'
 import { logger } from '@shared/logger'
 
 const store = useXiaobuFormStore()
@@ -168,7 +168,11 @@ watch(
   () => store.chatOpen,
   (open) => {
     if (open) openEmpathy()
-    else store.clearTurn()
+    else {
+      // ★ 先 closeEmpathy() 作废在途云端请求，再清本轮 —— 防止迟到的云回应写进已收起的面板
+      closeEmpathy()
+      store.clearTurn()
+    }
   },
 )
 
@@ -214,7 +218,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
     <div v-if="store.chatOpen" class="orb-chat" :style="{ top: `${store.orb.y - 90}px` }">
       <div class="orb-chat__bubble">
         <p v-if="store.latest.mine" class="orb-chat__mine">{{ store.latest.mine }}</p>
-        <p class="orb-chat__reply">{{ store.typing ? '……' : store.latest.reply }}</p>
+        <!-- ★ 本地回应永远显示，不被 typing 遮住：云端失败时"答案"不会消失又回来 -->
+        <p class="orb-chat__reply">{{ store.latest.reply }}</p>
+        <p v-if="store.typing" class="orb-chat__thinking">小卜在想…</p>
       </div>
 
       <!-- 首次同意行：让小卜想得更远（会把你说的话发给它）。★ 独立同意通道，不进解读白名单 -->
@@ -345,6 +351,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font-size: 13px;
   line-height: 1.5;
   color: var(--c-ink);
+}
+
+/* "正在想"轻指示：独立小字，不遮住已渲染的回应 */
+.orb-chat__thinking {
+  margin: 0;
+  align-self: flex-start;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--c-ink-2);
+  opacity: 0.65;
 }
 
 /* 首次同意行 */

@@ -35,6 +35,12 @@ export interface XiaobuConfig {
      * 即便置 true，仍需用户显式同意（consent='on'）才会把原话发往 /api/chat。
      */
     empathyCloud: { enabled: boolean }
+    /**
+     * 背景环境音。★ 默认 true：氛围的一部分，随季节/时段静默播放。
+     * 与"点赞/埋点"无关，也不出端任何用户数据；音轨是 CDN 上的公开静态资源。
+     * 用户可随时用 HUD 的静音开关关掉并永久记住。
+     */
+    ambientAudio: { enabled: boolean }
   }
   quota: { llmDailyFreePerUser: number; llmGlobalDailyCircuit: number }
   assets: { cdnBase: string; packs: Record<string, string>; integrity: string }

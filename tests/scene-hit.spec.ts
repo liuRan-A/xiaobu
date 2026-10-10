@@ -170,7 +170,7 @@ describe('可点域 · 结构性约束', () => {
 
 describe('命中优先级 · 顺序错了就是 bug', () => {
   /** 故意把五类物件**全部堆在同一个点上**，用来一次判别顺序 */
-  const CROWD: Pt = { x: 195, y: 738 } // 茶几锚点，也是塔罗区中心
+  const CROWD: Pt = { x: 300, y: 636 } // 茶几锚点，也是塔罗区中心（2026-10-10 移到右前角）
   const crowded = (): SceneHitState =>
     withState({
       coins: [CROWD],
@@ -356,7 +356,7 @@ describe('放置锚点', () => {
 
 describe('牌堆（美术稿到位前恒为 null）', () => {
   it('默认不在场：戳毯子落到 none，之后由 zoneAt 兜底进塔罗区', () => {
-    const felt: Pt = { x: 195, y: 800 }
+    const felt: Pt = { x: 300, y: 700 }
     const hit = hitTestAt(felt, idleHitState())
     expect(hit).toEqual({ kind: 'none' })
     // ★ 兜底链是完好的：none → zoneAt → TAROT。所以"牌堆还没画"不会让毯子变哑
@@ -364,7 +364,7 @@ describe('牌堆（美术稿到位前恒为 null）', () => {
   })
 
   it('在场时按自己的半径命中，且**优先于**锚点', () => {
-    const deck: HitCircle = { id: 'deck-1', at: { x: 195, y: 745 } }
+    const deck: HitCircle = { id: 'deck-1', at: { x: 300, y: 636 } }
     const s = withState({ deck })
     expect(hitTestAt(deck.at, s)).toEqual({ kind: 'deck' })
     expect(hitTestAt({ x: deck.at.x + DECK_TOUCH_R_PT - 1, y: deck.at.y }, s)).toEqual({
@@ -423,7 +423,7 @@ describe('全画布扫描 · 任何一点都要有合法结局', () => {
       coins: [{ x: 196, y: 452 }, { x: 232, y: 476 }],
       memory: [{ id: 'm1', at: anchorPt('WINDOW_SILL') }],
       timepiece: [{ id: 't1', at: { x: 300, y: 700 } }],
-      deck: { id: 'deck-1', at: { x: 195, y: 745 } },
+      deck: { id: 'deck-1', at: { x: 300, y: 636 } },
     })
 
     const seen = new Set<string>()
@@ -558,7 +558,7 @@ describe('引擎接线 · 语义决定了去哪', () => {
     expect(engine.snapshot().zone).toBe('TAROT')
   })
 
-  it('★ 点木桌/窗边/香炉旁仍然进六爻（按锚点自己的 zone，不是按几何分区）', async () => {
+  it('★ 点木桌/窗边/毯边仍然进六爻（按锚点自己的 zone，不是按几何分区）', async () => {
     for (const id of ['TABLE_TOP', 'WINDOW_SILL', 'CENSER_SIDE'] as const) {
       const engine = await mkEngine(mkHit(stateWith()))
       tap(engine, anchorPt(id))
@@ -569,10 +569,10 @@ describe('引擎接线 · 语义决定了去哪', () => {
 
   it('★ 木桌锚点域的**外沿**也进六爻 —— 这里 zoneAt 会判成塔罗，锚点分区才是权威', async () => {
     // 这条是"为什么不能用 zoneAt(at) 代替锚点自己的 zone"的实证。
-    // 木桌锚点圆心 y=612、半径 44，所以域的下沿在 y=656；
-    // 而塔罗区（圆心 y=745、半径 130）从 y=615 起就把这一段吃进了重叠区，
-    // 按"半径小的赢"算出来是 TAROT。用 zoneAt 代替 → 用户点木桌前沿会被送进塔罗。
-    const edge: Pt = { x: 195, y: 656 }
+    // 木桌锚点圆心 (195,612)、半径 44，取它朝塔罗区的**右沿** x = 195 + 44 = 239；
+    // 该点落在塔罗圆（圆心 300,636、半径 100）内 —— 距塔罗圆心 65.6pt，
+    // 按"半径小的赢"算出来是 TAROT。用 zoneAt 代替 → 用户点木桌右沿会被送进塔罗。
+    const edge: Pt = { x: 239, y: 612 }
     const a = getAnchor('TABLE_TOP')
     expect(a).not.toBeNull()
     expect(dist(edge, a!.at)).toBeLessThanOrEqual(a!.radius + 1e-9)
@@ -600,7 +600,7 @@ describe('引擎接线 · 语义决定了去哪', () => {
   })
 
   it('点牌堆进塔罗（美术稿到位后这条路径就会真的被走到）', async () => {
-    const deckAt: Pt = { x: 195, y: 745 }
+    const deckAt: Pt = { x: 300, y: 636 }
     const engine = await mkEngine(mkHit(stateWith({ deck: { id: 'deck-1', at: deckAt } })))
     tap(engine, deckAt)
     expect(engine.roomState).toBe('SPREAD_PICK')
@@ -621,7 +621,7 @@ describe('引擎接线 · 语义决定了去哪', () => {
   })
 
   it('戳空地毯（none）会经 zoneAt 兜底进塔罗 —— "随便点一下也有回应"', async () => {
-    const felt: Pt = { x: 195, y: 800 }
+    const felt: Pt = { x: 300, y: 700 }
     expect(idleHitState().deck).toBeNull()
     const engine = await mkEngine(mkHit(stateWith()))
     tap(engine, felt)
@@ -709,13 +709,13 @@ describe('engineHost · 单例与活状态', () => {
     }
 
     // ── 探针 A：牌堆 ─────────────────────────────────────────────────────
-    // 香炉旁 (400,500) 在**六爻区**里，且正好压着 CENSER_SIDE 锚点 ——
+    // 毯边 (96,640) 在**六爻区**里，且正好压着 CENSER_SIDE 锚点 ——
     // 于是"看见牌堆"与"看不见牌堆"会走向完全不同的两条支线，判别力最强。
     const censer = anchorPt('CENSER_SIDE')
     host.setDeck(null)
     const eA = await engineReadingLiveScene()
     tap(eA, censer)
-    expect(eA.roomState, '没有牌堆时，香炉旁应当走六爻').toBe('MOOD_PICK')
+    expect(eA.roomState, '没有牌堆时，毯边应当走六爻').toBe('MOOD_PICK')
 
     host.setDeck({ id: 'deck-x', at: censer })
     const eB = await engineReadingLiveScene()

@@ -35,8 +35,8 @@
  *   渲染栈一个图层都没画出来，用户看到的也是暖奶油色 —— 绝不会是白屏。
  * ===========================================================================
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { CanvasRenderer, designToScreen, screenToDesign } from '@scene/renderer'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { CanvasRenderer, designToScreen, screenToDesign, type LayerStack } from '@scene/renderer'
 import {
   createSceneStack,
   resetXiaobuPos,
@@ -52,8 +52,11 @@ import {
 } from '@scene/layers'
 import { dropOutcome, followDrag, hitXiaobu, isDrag } from '@scene/xiaobuDrag'
 import { useXiaobuFormStore } from '@store/xiaobuForm'
+import { useWeatherStore } from '@store/weather'
+import { useAudioStore } from '@store/audio'
+import { ambienceForKind, applyAmbience } from '@scene/ambience'
 import { createRitualFx, type RitualFx } from '@scene/ritual/RitualFx'
-import { createTexLoader } from '@services/tex'
+import { createTexLoader, loadCardFace } from '@services/tex'
 import { CORE_FACE_URLS } from '@services/tex/tarotPath'
 import { getCardBySlug } from '@core/tarot/cardsIndex'
 import backUrl from '@assets/tarot/back.webp'
@@ -84,6 +87,27 @@ let xiaobuDrag: { pointerId: number; start: Pt; last: Pt; moved: boolean } | nul
  */
 let memoryDrag: { pointerId: number; kind: MemoryKind } | null = null
 const xiaobuForm = useXiaobuFormStore()
+const weather = useWeatherStore()
+const audio = useAudioStore()
+
+/** 渲染栈（onMounted 里创建）。天气氛围 watch 需要它，故提到模块作用域持有 */
+let stackRef: LayerStack | null = null
+
+/**
+ * 天气 → 氛围接线。
+ * ★ watch 建在 setup（而非 onMounted 内）并在拿到渲染栈后立即应用一次：
+ *   这样"天气异步刷新回来"时，只要渲染栈已就绪就能改到画面；
+ *   且不会在 onMounted 里反复建 watch（那会随重挂累积）。
+ * ★ 拿不到天气（unknown / 停滞）时 ambienceForKind 给出的是**出厂中性氛围**，
+ *   所以断网 / 关停天气时画面与出厂一致，绝不"跳一下"。
+ */
+watch(
+  () => weather.kind,
+  (kind) => {
+    if (stackRef) applyAmbience(ambienceForKind(kind), stackRef)
+  },
+  { immediate: true },
+)
 
 let renderer: CanvasRenderer | null = null
 /** 掷币动效层。★ 与画布同生命周期 —— 它注册进渲染栈，画布没了它就无处可画 */
@@ -380,7 +404,8 @@ onMounted(() => {
   }
 
   // ── 贴图预热（M3 混合渲染 · 贴图路径）───────────────────────────────────
-  //   TexLoader 有界 LRU 加载卡背与主包牌面样张，就绪后喂给 L4Props。
+  //   卡背走 TexLoader 有界 LRU；牌面走 `@services/tex` 的统一入口 `loadCardFace`
+  //   （主包静态 / 按需 CDN 同一个入口，双路径分叉只在 tarotPath.ts）。
   //   失败/未就绪 → 对应贴图保持缺省 → 走程序化占位（正常路径，非错误）。
   const texLoader = createTexLoader()
   texLoader
@@ -390,11 +415,10 @@ onMounted(() => {
     })
     .catch((e) => handle(e, 'scene.texture'))
 
-  for (const [slug, url] of Object.entries(CORE_FACE_URLS)) {
+  for (const slug of Object.keys(CORE_FACE_URLS)) {
     const card = getCardBySlug(slug)
     if (!card) continue
-    texLoader
-      .ensure(url)
+    loadCardFace(card.id)
       .then((src) => {
         if (src) setCardFaceTex(card.id, src)
       })
@@ -449,6 +473,15 @@ onMounted(() => {
     })
     renderer.start()
 
+    // ── 天气氛围 + 背景音接线（★ 都不阻塞首帧）──────────────────────────
+    //   ① 把刚建好的渲染栈交给氛围 watch，并立刻按当前天气应用一次；
+    //   ② 非阻塞拉一次天气（刷新回来时 watch 会把氛围改掉）；
+    //   ③ 装背景音（幂等、不 await；拿不到就静默没有声音）。
+    stackRef = stack
+    applyAmbience(ambienceForKind(weather.kind), stack)
+    void weather.refresh()
+    audio.start()
+
     // ★ 输了：画布先跑起来（用户立刻看见小屋），引擎再异步读磁盘。
     //   反过来的话，一块 5KB 的本地数据会挡住首帧 —— 那是"为了我的记忆，
     //   让你先看两秒白屏"，完全不符合"零门槛"。
@@ -481,6 +514,8 @@ onBeforeUnmount(() => {
   xiaobuDrag = null
   memoryDrag = null
   setPendingMemory(null)
+  // 渲染栈随画布一起销毁：氛围 watch 从此不再写到任何图层
+  stackRef = null
 
   if (resizeObserver) {
     resizeObserver.disconnect()

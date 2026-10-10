@@ -40,11 +40,31 @@
       客户端才会把这一句原话发过来（见 src/services/empathyCloud.ts）。
     · 服务端**不落盘**，日志只记长度与枚举，绝不记正文。
   契约：{text≤200, mood|null, turns} → {reply≤34, cents}
+
+第三条链路：POST /api/asr（语音听写）
+--------------------------------------------------------------------------
+  ★ 同样是**独立同意通道**，与 /api/chat 各管各的：
+    · 只有当用户对**音频出端**单独点头（voiceConsent='on'）且功能开关开启时，
+      客户端才会把这段录音发过来（见 src/services/asr.ts）。
+    · 出端物是 base64 音频，不是文本 —— 比文字更敏感，所以单独一个开关、单独一个端点。
+    · 服务端**不落盘**，日志只记字节数与时长，绝不记音频内容。
+  契约：{audio(base64≤4M), format, durationMs} → {text, cents}
+  未配置讯飞（XIAOBU_IFLYTEK_*）或拿不到结果 ⇒ text="" + X-Xiaobu-Stub: 1。
+
+第四条链路：GET /api/weather（天气 · 只读氛围）
+--------------------------------------------------------------------------
+  ★ 与上面三条都不同：**它不接收任何用户数据**，只把和风天气归一成一份只读快照。
+    · 和风 Key 只在服务端 .env（XIAOBU_HEFENG_*），客户端只见 kind/tempC/降级码；
+    · kind 只五档，刻意零行话、不报好坏；
+    · 这份数据在客户端只流向氛围层，绝不参与六爻 / 塔罗 / 解读。
+  契约：{} → {kind, tempC|null, degraded, brightness, updatedAt}
+  未配置 / 超时 / 上游非 200 ⇒ kind='unknown' + 降级码 + X-Xiaobu-Stub: 1。
 ==========================================================================
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Literal, Optional
@@ -53,7 +73,7 @@ from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from server import guard, llm
+from server import asr, guard, llm, weather
 
 logger = logging.getLogger("xiaobu.chat")
 
@@ -130,8 +150,61 @@ class ChatResponse(BaseModel):
     cents: int = 0
 
 
+class AsrRequest(BaseModel):
+    """
+    ★ 语音听写请求 —— 第三条独立通道（见 src/services/asr.ts）。
+
+      · 与 ReadingRequest / ChatRequest 是**三个端点、三套契约**；
+      · 出端物是**录音音频**（base64），只在客户端 consent='on' 时才被填充；
+      · 本字段刻意写死成 str，不引 bytes —— FastAPI 直接收 base64 更省事，
+        长度上限由 _decode_audio() 把关（防误传大文件）。
+      · durationMs 是数值（毫秒），仅用于日志/成本估算，不参与识别。
+    """
+
+    audio: str = ""
+    format: str = ""
+    durationMs: int = 0
+
+
+class AsrResponse(BaseModel):
+    # 识别出的那句话；拿不到就为空串（客户端据此提示"没听清"）
+    text: str = ""
+    cents: int = 0
+
+
+class WeatherResponse(BaseModel):
+    """
+    ★ 天气快照（第四条链路：GET /api/weather）—— **只读氛围输入**，与玩法无关。
+
+      · 客户端只见这个**归一化形状**，和风 Key 只在服务端 .env 里；
+      · kind 只五档：clear / cloudy / rain / snow / unknown（零行话、不报好坏）；
+      · degraded：0 正常 / 1 上游超时 / 2 未配置或拿不到 / 3 被一键关停；
+      · tempC 未知为 None（Optional[int]，pydantic v1 不认 `int | None`）。
+    """
+
+    kind: Literal["clear", "cloudy", "rain", "snow", "unknown"] = "unknown"
+    tempC: Optional[int] = None
+    degraded: int = 0
+    brightness: float = 0.5
+    updatedAt: int = 0
+
+
 # ★ 服务端兜底回应：与客户端本地回应同调性，恒 ≤34 字、恒无禁词
 FALLBACK_CHAT_REPLY = "嗯，我在听。你慢慢说。"
+
+# ★ 单次听写请求里 base64 串的长度上限（约对应 2MB 原始音频，见 server/asr.py）
+ASR_MAX_B64_CHARS = 4_000_000
+
+
+def _decode_audio(b64: str) -> bytes:
+    """base64 → 原始字节。★ 永不抛：空串 / 脏串 / 超长都返回 b''（上层据此回落"没听清"）。"""
+    s = str(b64 or "").strip()
+    if not s or len(s) > ASR_MAX_B64_CHARS:
+        return b""
+    try:
+        return base64.b64decode(s, validate=False)
+    except Exception:  # noqa: BLE001 —— 脏 base64 不是错误，是"没听清"
+        return b""
 
 
 def _int_of(v: Any) -> int | None:
@@ -401,4 +474,44 @@ def chat(req: ChatRequest, response: Response) -> ChatResponse:
     # 空文本 / 未配置模型 / 调用失败 / 回应不合格 ⇒ 回落固定安全句（带 guard 标记）
     response.headers["X-Xiaobu-Guard"] = "1"
     return ChatResponse(reply=FALLBACK_CHAT_REPLY, cents=0)
+
+
+@app.post("/api/asr", response_model=AsrResponse)
+def speech(req: AsrRequest, response: Response) -> AsrResponse:
+    """
+    ★ 语音听写（第三条独立通道）—— 客户端只在 consent='on' 且开关开启时才会调到这里。
+    ★ 隐私：本函数**不打印音频内容**，日志只记字节数与时长；不落盘、`Retention: none`。
+    ★ 降级：未配置讯飞 / 缺 websockets / 格式不支持 / 识别为空 ⇒ 返回空 text（带 stub 标记），
+      客户端据此提示"没听清"，行为与断网完全一致。
+    """
+    audio_bytes = _decode_audio(req.audio)
+    logger.info(
+        "[asr] bytes=%d format=%s duration_ms=%d", len(audio_bytes), req.format, req.durationMs
+    )
+
+    if asr.is_configured() and audio_bytes:
+        text = asr.transcribe(audio_bytes, req.format, req.durationMs)
+        if text:
+            return AsrResponse(text=text, cents=0)
+
+    # 未配置 / 拿不到 ⇒ 回落空文本，并给人工/联调一个明确信号
+    response.headers["X-Xiaobu-Stub"] = "1"
+    return AsrResponse(text="", cents=0)
+
+
+@app.get("/api/weather", response_model=WeatherResponse)
+def weather_now(response: Response) -> WeatherResponse:
+    """
+    ★ 天气（第四条链路）—— **只读氛围输入**，与六爻 / 塔罗 / 解读全无关系。
+
+      · 和风 Key 只在服务端 .env；客户端只见归一化快照（路径里无任何密钥）。
+      · 隐私：本函数**不接收也不处理任何用户数据**，请求里根本没有用户字段。
+      · 降级：未配置 / 超时 / 上游非 200 ⇒ kind='unknown' + 降级码（带 X-Xiaobu-Stub: 1），
+        客户端据此"今天先不说天气"，行为与断网完全一致。
+    """
+    snap = weather.fetch_snapshot()
+    if snap.get("degraded", 0) != 0:
+        # 给人工/联调一个明确信号：这一份不是真实天气
+        response.headers["X-Xiaobu-Stub"] = "1"
+    return WeatherResponse(**snap)
 

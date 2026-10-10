@@ -7,7 +7,7 @@
  * ── 一次「低语」的完整时序（先本地、再云端、失败不回落也不打断）────────────
  *   ① 用户发送
  *   ② **同帧**渲染本地回应（零延迟、断网可用、永远有话说）
- *   ③ 若「同意 + 开关开启」⇒ 后台请求云端
+ *   ③ 若「同意 + 云端可用（开关/停用/熔断/额度）」⇒ 后台请求云端
  *   ④ 回来时用 `seq` 守卫：只在"还是这一轮对话"时静默替换，避免跨轮串话
  *
  * ── 三条边界 ────────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@
 import { useXiaobuFormStore } from '@store/xiaobuForm'
 import { getEngine } from '@store/engineHost'
 import { replyLocally, isEmpathySafe } from '@core/empathy/empathy'
-import { requestCloudEmpathy } from '@services/empathyCloud'
+import { requestCloudEmpathy, isEmpathyCloudEnabled } from '@services/empathyCloud'
 import { trackFunnel } from '@services/track'
 import { logger } from '@shared/logger'
 
@@ -44,6 +44,16 @@ export function openEmpathy(): void {
 }
 
 /**
+ * 关闭对话面板时调：作废在途的云端请求、清轮次。
+ * ★ 自增 seq 后，任何"迟到"的云端回应都会在会话守卫处被丢弃 ——
+ *   不会写进已收起的面板，重开时也不会看到上一会话的回复（防跨会话串话）。
+ */
+export function closeEmpathy(): void {
+  turnCount = 0
+  sessionSeq++
+}
+
+/**
  * 用户发一句。★ 永不抛、永远先给出回应（本地那句一定在）。
  */
 export async function sendEmpathy(text: string): Promise<void> {
@@ -58,8 +68,9 @@ export async function sendEmpathy(text: string): Promise<void> {
   store.setDraft('')
   trackFunnel('EMPATHY_SEND')
 
-  // ③ 云端是可选增强：未同意 / 开关关闭时到此为止
-  if (store.cloudConsent !== 'on') {
+  // ③ 云端是可选增强：未同意 / 开关关闭 / 停用 / 熔断 / 额度用尽时到此为止
+  //    ★ 这里一并看 isEmpathyCloudEnabled()：闸门不过时连 typing 都不显示，观感上"就像本地的"
+  if (store.cloudConsent !== 'on' || !isEmpathyCloudEnabled()) {
     trackFunnel('EMPATHY_REPLY_LOCAL')
     return
   }
