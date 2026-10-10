@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#FDF9F6" />
+    <meta name="color-scheme" content="light only" />
+    <title>小卜</title>
+
+    <!--
+      ★ 防崩第一道防线：不白屏
+      JS 还没执行、或者 JS 直接崩了，用户看到的也必须是一块暖奶油色 —— 而不是浏览器默认的白。
+      Checklist §0 的"不白屏"从这里就开始算。
+    -->
+    <style>
+      html,
+      body,
+      #app {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #fdf9f6; /* = tokens.css --c-cream */
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      /* 首帧加载指示：一朵极淡的暖色呼吸圆点，不用任何"加载中…"文字 */
+      #boot-veil {
+        position: fixed;
+        inset: 0;
+        background: #fdf9f6;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: opacity 0.45s ease;
+      }
+      #boot-veil.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #boot-veil i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #e8c77f;
+        animation: breathe 1.6s ease-in-out infinite;
+      }
+      @keyframes breathe {
+        0%,
+        100% {
+          opacity: 0.25;
+          transform: scale(0.85);
+        }
+        50% {
+          opacity: 0.75;
+          transform: scale(1.15);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="boot-veil"><i></i></div>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

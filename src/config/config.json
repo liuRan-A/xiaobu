@@ -1,0 +1,58 @@
+{
+  "_comment": "小卜 · 本地默认配置（内置真源）。断网 / 首启 / 验签失败时的最终答案。",
+  "_redline": "★ 本文件内不允许出现任何密钥。和风 / DeepSeek / 讯飞的 Key 全部在自家后端代理里，客户端只拿 cdnBase 与哈希。",
+
+  "schemaVersion": 3,
+
+  "features": {
+    "weather": { "enabled": true, "provider": "hefeng", "ttlFreshMin": 30, "ttlStaleHour": 6 },
+    "voiceInput": { "enabled": true },
+    "haptics": { "enabled": true },
+    "ledger": { "cnzz": false, "abtest": false },
+    "empathyCloud": { "enabled": false }
+  },
+
+  "quota": {
+    "llmDailyFreePerUser": 20,
+    "llmGlobalDailyCircuit": 20000
+  },
+
+  "assets": {
+    "cdnBase": "https://cdn.example.com/scene/",
+    "packs": {
+      "spring": "spring.v3.pack",
+      "summer": "summer.v3.pack",
+      "autumn": "autumn.v3.pack",
+      "winter": "winter.v3.pack"
+    },
+    "integrity": ""
+  },
+
+  "devWhitelist": {
+    "salt": "sb-v1",
+    "deviceHashes": []
+  },
+
+  "killSwitch": {
+    "forceSpringOnly": false,
+    "disableLlm": false,
+    "disableWeather": false,
+    "disableTrack": false
+  },
+
+  "monitor": {
+    "trackEnabled": true,
+    "batchIntervalMs": 300000,
+    "batchMaxCount": 50,
+    "batchMaxBytes": 8192,
+    "flushOnBackground": true,
+    "sampleRate": 1.0
+  },
+
+  "tuning": {
+    "longPressMs": 180,
+    "tossDistancePt": 60,
+    "snapRadiusPt": 28,
+    "settleMs": 1200
+  }
+}

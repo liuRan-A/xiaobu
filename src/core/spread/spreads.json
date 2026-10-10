@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "_note": [
+    "小卜 · 牌阵配置（数据驱动，严禁在渲染代码里写死任何坐标）",
+    "坐标是「牌阵空间」里的单位，画布 720 × 720，只作为**相对关系**真源；",
+    "落到屏幕上由 spreadConfig.ts 的 resolveLayout() 等比适配到面板盒子。",
+    "每张牌必须给 order（抽牌顺序）。order 必须是 1..count 的一个排列 —— 有单测钉住。",
+    "★ 排版铁律：name = 真名（第一行主标题）；poeticAlias + poeticLine + suitable",
+    "  拼成副标题（第二行，温柔的解释）。副标题由 subtitleOf() 生成，不许手写第二遍。"
+  ],
+  "card": { "w": 108, "h": 180, "radius": 12 },
+  "canvas": { "w": 720, "h": 720 },
+  "spreads": [
+    {
+      "id": "daily-single",
+      "tier": "hot",
+      "name": "单张每日指引",
+      "poeticAlias": "清晨的一枚书签",
+      "poeticLine": "一句话，今天只带这一句上路",
+      "suitable": ["今日状态", "随手一抽"],
+      "reading": "single",
+      "count": 1,
+      "cards": [{ "x": 360, "y": 360, "rot": 0, "order": 1, "lane": "main", "role": "today", "label": "今日" }]
+    },
+    {
+      "id": "past-present-future",
+      "tier": "hot",
+      "name": "三张过去·现在·未来",
+      "poeticAlias": "河流的三道波光",
+      "poeticLine": "看清来路、脚下与前方，三张牌连成一条时间线",
+      "suitable": ["时间线梳理", "短期趋势"],
+      "reading": "timeline",
+      "count": 3,
+      "cards": [
+        { "x": 232, "y": 360, "rot": 0, "order": 1, "lane": "main", "role": "past", "label": "过去" },
+        { "x": 360, "y": 360, "rot": 0, "order": 2, "lane": "main", "role": "present", "label": "现在" },
+        { "x": 488, "y": 360, "rot": 0, "order": 3, "lane": "main", "role": "future", "label": "未来" }
+      ]
+    },
+    {
+      "id": "crossroads-two",
+      "tier": "advanced",
+      "name": "二选一抉择阵",
+      "poeticAlias": "十字路口的微风",
+      "poeticLine": "如果你面临选择，让牌面看看两边的风景",
+      "suitable": ["决策困难", "求事业"],
+      "reading": "comparison",
+      "count": 5,
+      "cards": [
+        { "x": 360, "y": 470, "rot": 0, "order": 1, "lane": "main", "role": "now", "label": "此刻" },
+        { "x": 190, "y": 330, "rot": -6, "order": 2, "lane": "A", "role": "pathA_near", "label": "这条路 · 近景" },
+        { "x": 120, "y": 170, "rot": -6, "order": 3, "lane": "A", "role": "pathA_far", "label": "这条路 · 远处" },
+        { "x": 530, "y": 330, "rot": 6, "order": 4, "lane": "B", "role": "pathB_near", "label": "那条路 · 近景" },
+        { "x": 600, "y": 170, "rot": 6, "order": 5, "lane": "B", "role": "pathB_far", "label": "那条路 · 远处" }
+      ]
+    },
+    {
+      "id": "celtic-cross",
+      "tier": "advanced",
+      "name": "凯尔特十字牌阵",
+      "poeticAlias": "深潜星图",
+      "poeticLine": "一次深度的自我对话，剖析深层阻碍与结果",
+      "suitable": ["复杂心结", "人生规划"],
+      "reading": "cross",
+      "count": 10,
+      "cards": [
+        { "x": 290, "y": 390, "rot": 0, "order": 1, "lane": "main", "role": "now", "label": "现况" },
+        { "x": 290, "y": 390, "rot": 90, "order": 2, "lane": "main", "role": "block", "label": "横亘其上的阻碍或助力" },
+        { "x": 290, "y": 575, "rot": 0, "order": 3, "lane": "main", "role": "root", "label": "根基" },
+        { "x": 145, "y": 390, "rot": 0, "order": 4, "lane": "main", "role": "past", "label": "正在退场的事" },
+        { "x": 290, "y": 200, "rot": 0, "order": 5, "lane": "main", "role": "goal", "label": "意识里的目标" },
+        { "x": 435, "y": 390, "rot": 0, "order": 6, "lane": "main", "role": "future", "label": "即将到来的" },
+        { "x": 600, "y": 140, "rot": 0, "order": 7, "lane": "staff", "role": "self", "label": "你的姿态" },
+        { "x": 600, "y": 305, "rot": 0, "order": 8, "lane": "staff", "role": "env", "label": "身处的环境" },
+        { "x": 600, "y": 470, "rot": 0, "order": 9, "lane": "staff", "role": "hope_fear", "label": "既希望又害怕的" },
+        { "x": 600, "y": 625, "rot": 0, "order": 10, "lane": "staff", "role": "outcome", "label": "若如此走下去 · 结果" }
+      ]
+    }
+  ]
+}

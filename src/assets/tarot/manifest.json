@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "_comment": "塔罗牌面资产登记（由 scripts/bake-tarot-samples.py 生成，勿手改）。faces 只登记**进主包/已知**的那几张；78 张里的其余牌面走 CDN 按需加载，URL 由 config.assets.cdnBase 派生（见 src/services/tex/tarotPath.ts）。",
+  "dirs": {
+    "core": "tarot/faces/core/",
+    "ondemand": "tarot/faces/ondemand/"
+  },
+  "faces": [
+    {
+      "id": "major-00",
+      "slug": "the-fool",
+      "file": "the-fool.webp",
+      "core": true,
+      "bytes": 6398,
+      "w": 512,
+      "h": 768
+    },
+    {
+      "id": "major-17",
+      "slug": "the-star",
+      "file": "the-star.webp",
+      "core": true,
+      "bytes": 6768,
+      "w": 512,
+      "h": 768
+    },
+    {
+      "id": "major-18",
+      "slug": "the-moon",
+      "file": "the-moon.webp",
+      "core": true,
+      "bytes": 6266,
+      "w": 512,
+      "h": 768
+    }
+  ]
+}

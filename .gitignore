@@ -1,0 +1,29 @@
+# 依赖与产物
+node_modules/
+dist/
+.preview-build/
+vite.config.ts.timestamp-*.mjs
+
+# 塔罗按需牌面暂存区（scripts/bake-tarot-samples.py --all 产出，待上传 CDN，不入库）
+export/
+
+# Python 后端（server/）
+__pycache__/
+*.py[cod]
+.venv/
+server/.venv/
+server/.env
+
+# Capacitor 原生工程（由 cap sync 生成，不进仓库）
+android/
+ios/
+
+# 编辑器 / 系统
+.DS_Store
+Thumbs.db
+*.local
+.vscode/*
+!.vscode/extensions.json
+
+# ★ preview/ 要进仓库：它是 M1 的视觉回归基线，
+#   评审时直接看图比在真机上翻页面快得多。改画面后请重新 `npm run preview:scene` 并一起提交。
