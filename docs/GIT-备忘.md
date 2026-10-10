@@ -16,9 +16,9 @@ user.email = 334571478+liuRan-A@users.noreply.github.com
 | 项 | 值 |
 | --- | --- |
 | 本地路径 | `c:\Users\LENOVO\WorkBuddy\2026-10-09-15-08-16\xiaobu` |
-| 远端 origin | `git@github.com:liuRan-A/-.git`（SSH；改名后为 `git@github.com:liuRan-A/xiaobu.git`） |
+| 远端 origin | `git@github.com:liuRan-A/xiaobu.git`（SSH） |
 | 分支 | `main` ↔ `origin/main`（已建立跟踪） |
-| 首次提交 | `f27029b` |
+| 首次提交 | `eafb971` |
 | 认证方式 | SSH Key 已就绪（`ssh -T git@github.com` → `Hi liuRan-A!`），无需 Token |
 
 ## 日常命令
@@ -40,9 +40,3 @@ android/  ios/  vite.config.ts.timestamp-*.mjs
 ```
 
 > `server/.env` 存放密钥，永不入库（已确认未被跟踪）。
-
-## 改名后需执行
-
-```bash
-git remote set-url origin git@github.com:liuRan-A/xiaobu.git
-```
